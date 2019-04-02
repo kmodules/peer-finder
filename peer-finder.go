@@ -64,11 +64,13 @@ func lookup(svcName string) (sets.String, error) {
 func shellOut(sendStdin, script string) {
 	log.Printf("execing: %v with stdin: %v", script, sendStdin)
 	// TODO: Switch to sending stdin from go
-	out, err := exec.Command("bash", "-c", fmt.Sprintf("echo -e '%v' | %v", sendStdin, script)).CombinedOutput()
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("echo -e '%v' | %v", sendStdin, script))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
 	if err != nil {
-		log.Fatalf("Failed to execute %v: %v, err: %v", script, string(out), err)
+		log.Fatalf("Failed to execute %v:, err: %v", script, err)
 	}
-	log.Print(string(out))
 }
 
 func forwardSigterm() {
