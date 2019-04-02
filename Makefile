@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+PKG = kmodules.xyz/peer-finder
+
 all: push
 
 TAG = 0.1
@@ -31,3 +33,16 @@ push: container
 
 clean:
 	rm -f peer-finder
+
+build: clean
+	dep ensure -v
+	docker run                      \
+		--rm                        \
+		-u $$(id -u):$$(id -g)      \
+        -v /tmp:/.cache             \
+		-v "$$(pwd):/go/src/$(PKG)" \
+		-w /go/src/$(PKG)           \
+		-e GOOS=linux               \
+		-e GOARCH=amd64             \
+		golang:1.10                 \
+		go build
