@@ -65,8 +65,7 @@ func shellOut(sendStdin, script string) {
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("echo -e '%v' | %v", sendStdin, script))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		log.Fatalf("Failed to execute %v:, err: %v", script, err)
 	}
 }
