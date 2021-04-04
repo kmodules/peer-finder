@@ -18,6 +18,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -32,12 +33,35 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang/glog"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
+
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	restclient "k8s.io/client-go/rest"
 )
 
 const (
 	pollPeriod = 1 * time.Second
+	hostsPath  = "/etc/hosts"
 )
+
+var (
+	kubeClient *kubernetes.Clientset
+)
+
+func init() {
+	kubeConfig, err := restclient.InClusterConfig()
+	if err != nil {
+		klog.Fatalln(err)
+	}
+	kubeClient, err = kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		klog.Fatalln(err)
+	}
+}
 
 var (
 	onChange  = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
@@ -45,9 +69,10 @@ var (
 	svc       = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
 	namespace = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
 	domain    = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
+	selector  = flag.String("selector", "", "The selector is used to select the pods whose ip will use to form peers")
 )
 
-func lookup(svcName string) (sets.String, error) {
+func lookupDNSs(svcName string) (sets.String, error) {
 	endpoints := sets.NewString()
 	_, srvRecords, err := net.LookupSRV("", "", svcName)
 	if err != nil {
@@ -59,6 +84,54 @@ func lookup(svcName string) (sets.String, error) {
 		endpoints.Insert(ep)
 	}
 	return endpoints, nil
+}
+
+func lookupHostIPs(hostName string) (sets.String, error) {
+	ips := sets.NewString()
+	hostIPs, err := net.LookupIP(hostName)
+	if err != nil {
+		return nil, err
+	}
+	for _, hostIP := range hostIPs {
+		ips.Insert(fmt.Sprintf("%v", hostIP.String()))
+	}
+	return ips, nil
+}
+
+func updateHostsFile(ipAliases []string) error {
+	//Append second line
+	file, err := os.OpenFile(hostsPath, os.O_APPEND|os.O_RDWR, 0644)
+	if err != nil {
+		log.Println(err)
+	}
+	defer file.Close()
+
+	var fileContent string
+	for _, ipAlias := range ipAliases {
+		fileContent += fmt.Sprintf("%s\n", ipAlias)
+	}
+
+	if _, err := file.WriteString(fileContent); err != nil {
+		log.Fatal(err)
+	}
+	return nil
+}
+
+func listPodsIP(namespace string) (sets.String, []string, error) {
+	endpoints := sets.NewString()
+	var ipAliases []string
+	podList, err := kubeClient.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: *selector,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, pod := range podList.Items {
+		endpoints.Insert(pod.Status.PodIP)
+		ipAliases = append(ipAliases, fmt.Sprintf("%s	%s", pod.Status.PodIP, pod.Name))
+	}
+
+	return endpoints, ipAliases, nil
 }
 
 func shellOut(sendStdin, script string) {
@@ -148,25 +221,47 @@ func main() {
 		domainName = strings.Join([]string{ns, "svc", *domain}, ".")
 	}
 
-	if *svc == "" || domainName == "" || (*onChange == "" && *onStart == "") {
+	if (*selector == "" && *svc == "") || domainName == "" || (*onChange == "" && *onStart == "") {
 		log.Fatalf("Incomplete args, require -on-change and/or -on-start, -service and -ns or an env var for POD_NAMESPACE.")
 	}
 
 	myName := strings.Join([]string{hostname, *svc, domainName}, ".")
+	hostIPs, err := lookupHostIPs(hostname)
+	if err != nil {
+		log.Fatalf("Failed to get ips from host %v", err.Error())
+		return
+	}
 	script := *onStart
 	if script == "" {
 		script = *onChange
 		log.Printf("No on-start supplied, on-change %v will be applied on start.", script)
 	}
 	for newPeers, peers := sets.NewString(), sets.NewString(); script != ""; time.Sleep(pollPeriod) {
-		newPeers, err = lookup(*svc)
-		if err != nil {
-			log.Printf("%v", err)
-			continue
-		}
-		if newPeers.Equal(peers) || !newPeers.Has(myName) {
-			log.Printf("Have not found myself in list yet.\nMy Hostname: %s\nHosts in list: %s", myName, strings.Join(newPeers.List(), ", "))
-			continue
+		var ipAliases []string
+		if *selector != "" {
+			newPeers, ipAliases, err = listPodsIP(ns)
+			if err != nil {
+				glog.Warning(err.Error())
+				return
+			}
+			if newPeers.Equal(peers) || !newPeers.HasAny(hostIPs.List()...) {
+				log.Printf("Have not found myself in list yet.\nMy Hostname: %s\nHosts in list: %s", myName, strings.Join(newPeers.List(), ", "))
+				continue
+			}
+			if err := updateHostsFile(ipAliases); err != nil {
+				log.Printf("%s file is failed to update, reason: %s", hostsPath, err.Error())
+				return
+			}
+		} else {
+			newPeers, err = lookupDNSs(*svc)
+			if err != nil {
+				log.Printf("%v", err)
+				continue
+			}
+			if newPeers.Equal(peers) || !newPeers.Has(myName) {
+				log.Printf("Have not found myself in list yet.\nMy Hostname: %s\nHosts in list: %s", myName, strings.Join(newPeers.List(), ", "))
+				continue
+			}
 		}
 		peerList := newPeers.List()
 		sort.Strings(peerList)
