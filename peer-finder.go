@@ -35,7 +35,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
-	restclient "k8s.io/client-go/rest"
+
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
 )
@@ -50,18 +51,10 @@ var (
 	log        = klogr.New().WithName("peer-finder")
 )
 
-func init() {
-	kubeConfig, err := restclient.InClusterConfig()
-	if err != nil {
-		klog.Fatalln(err)
-	}
-	kubeClient, err = kubernetes.NewForConfig(kubeConfig)
-	if err != nil {
-		klog.Fatalln(err)
-	}
-}
-
 var (
+	masterURL = flag.String( "master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig)")
+	kubeconfigPath = flag.String( "kubeconfig", "", "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
+
 	onChange  = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
 	onStart   = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
 	svc       = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
@@ -234,6 +227,17 @@ func run() error {
 
 	if (*selector == "" && *svc == "") || domainName == "" || (*onChange == "" && *onStart == "") {
 		return fmt.Errorf("incomplete args, require -on-change and/or -on-start, -service and -ns or an env var for POD_NAMESPACE")
+	}
+
+	if *selector != "" {
+		config, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeconfigPath)
+		if err != nil {
+			return fmt.Errorf("could not get Kubernetes config: %s", err)
+		}
+		kubeClient, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			return err
+		}
 	}
 
 	myName := strings.Join([]string{hostname, *svc, domainName}, ".")
