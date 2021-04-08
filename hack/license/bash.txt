@@ -1,4 +1,4 @@
-# Copyright 2016 The Kubernetes Authors All rights reserved.
+# Copyright AppsCode Inc. and Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,12 +12,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM k8s.gcr.io/ubuntu-slim:0.2
-MAINTAINER Prashanth.B <beeps@google.com>
-
-RUN apt-get update && apt-get install -y wget bash dnsutils
-ADD peer-finder /peer-finder
-ADD peer-finder.go /peer-finder.go
-
-EXPOSE 9376
-ENTRYPOINT ["/peer-finder"]
