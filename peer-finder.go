@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -33,14 +32,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang/glog"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/klog/v2"
-
-	"k8s.io/apimachinery/pkg/util/sets"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/klogr"
 )
 
 const (
@@ -50,6 +47,7 @@ const (
 
 var (
 	kubeClient *kubernetes.Clientset
+	log        = klogr.New().WithName("peer-finder")
 )
 
 func init() {
@@ -102,7 +100,7 @@ func updateHostsFile(ipAliases []string) error {
 	//Append second line
 	file, err := os.OpenFile(hostsPath, os.O_APPEND|os.O_RDWR, 0644)
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 	defer file.Close()
 
@@ -111,10 +109,8 @@ func updateHostsFile(ipAliases []string) error {
 		fileContent += fmt.Sprintf("%s\n", ipAlias)
 	}
 
-	if _, err := file.WriteString(fileContent); err != nil {
-		log.Fatal(err)
-	}
-	return nil
+	_, err = file.WriteString(fileContent)
+	return err
 }
 
 func listPodsIP(namespace string) (sets.String, []string, error) {
@@ -134,15 +130,17 @@ func listPodsIP(namespace string) (sets.String, []string, error) {
 	return endpoints, ipAliases, nil
 }
 
-func shellOut(sendStdin, script string) {
-	log.Printf("execing: %v with stdin: %v", script, sendStdin)
+func shellOut(sendStdin, script string) error {
+	log.Info("exec", "command", script, "stdin", sendStdin)
 	cmd := exec.Command(script)
 	cmd.Stdin = strings.NewReader(sendStdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to execute %v:, err: %v", script, err)
+	err := cmd.Run()
+	if err != nil {
+		log.Error(err, "execution failed", "script", script)
 	}
+	return err
 }
 
 func forwardSigterm() {
@@ -167,17 +165,30 @@ func forwardSigterm() {
 }
 
 func main() {
+	klog.InitFlags(nil)
+	_ = flag.Set("v", "3")
 	flag.Parse()
 
 	forwardSigterm()
 
+	// TODO: Exit if there's no on-change?
+	if err := run(); err != nil {
+		log.Error(err, "peer finder exiting")
+	}
+	klog.Flush()
+
+	log.Info("Block until Kubernetes sends SIGKILL")
+	select {}
+}
+
+func run() error {
 	ns := *namespace
 	if ns == "" {
 		ns = os.Getenv("POD_NAMESPACE")
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Fatalf("Failed to get hostname: %s", err)
+		return fmt.Errorf("failed to get hostname: %s", err)
 	}
 	var domainName string
 
@@ -186,7 +197,7 @@ func main() {
 		resolvConfBytes, err := ioutil.ReadFile("/etc/resolv.conf")
 		resolvConf := string(resolvConfBytes)
 		if err != nil {
-			log.Fatal("Unable to read /etc/resolv.conf")
+			return fmt.Errorf("unable to read /etc/resolv.conf")
 		}
 
 		var re *regexp.Regexp
@@ -198,7 +209,7 @@ func main() {
 			re, err = regexp.Compile(`\A(.*\n)*search\s{1,}(.*\s{1,})*(?P<goal>svc.([a-zA-Z0-9-]{1,63}\.)*[a-zA-Z0-9]{2,63})`)
 		}
 		if err != nil {
-			log.Fatalf("Failed to create regular expression: %v", err)
+			return fmt.Errorf("failed to create regular expression: %v", err)
 		}
 
 		groupNames := re.SubexpNames()
@@ -215,64 +226,60 @@ func main() {
 				break
 			}
 		}
-		log.Printf("Determined Domain to be %s", domainName)
+		log.Info("determined", "domain", domainName)
 
 	} else {
 		domainName = strings.Join([]string{ns, "svc", *domain}, ".")
 	}
 
 	if (*selector == "" && *svc == "") || domainName == "" || (*onChange == "" && *onStart == "") {
-		log.Fatalf("Incomplete args, require -on-change and/or -on-start, -service and -ns or an env var for POD_NAMESPACE.")
+		return fmt.Errorf("incomplete args, require -on-change and/or -on-start, -service and -ns or an env var for POD_NAMESPACE")
 	}
 
 	myName := strings.Join([]string{hostname, *svc, domainName}, ".")
 	hostIPs, err := lookupHostIPs(hostname)
 	if err != nil {
-		log.Fatalf("Failed to get ips from host %v", err.Error())
-		return
+		return fmt.Errorf("failed to get ips from host %v", err)
 	}
 	script := *onStart
 	if script == "" {
 		script = *onChange
-		log.Printf("No on-start supplied, on-change %v will be applied on start.", script)
+		log.Info(fmt.Sprintf("no on-start supplied, on-change %q will be applied on start.", script))
 	}
 	for newPeers, peers := sets.NewString(), sets.NewString(); script != ""; time.Sleep(pollPeriod) {
 		var ipAliases []string
 		if *selector != "" {
 			newPeers, ipAliases, err = listPodsIP(ns)
 			if err != nil {
-				glog.Warning(err.Error())
-				return
+				return err
 			}
 			if newPeers.Equal(peers) || !newPeers.HasAny(hostIPs.List()...) {
-				log.Printf("Have not found myself in list yet.\nMy Hostname: %s\nHosts in list: %s", myName, strings.Join(newPeers.List(), ", "))
+				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(newPeers.List(), ", "))
 				continue
 			}
 			if err := updateHostsFile(ipAliases); err != nil {
-				log.Printf("%s file is failed to update, reason: %s", hostsPath, err.Error())
-				return
+				return fmt.Errorf("%s file is failed to update, reason: %v", hostsPath, err)
 			}
 		} else {
 			newPeers, err = lookupDNSs(*svc)
 			if err != nil {
-				log.Printf("%v", err)
+				log.Info(err.Error())
 				continue
 			}
 			if newPeers.Equal(peers) || !newPeers.Has(myName) {
-				log.Printf("Have not found myself in list yet.\nMy Hostname: %s\nHosts in list: %s", myName, strings.Join(newPeers.List(), ", "))
+				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(newPeers.List(), ", "))
 				continue
 			}
 		}
 		peerList := newPeers.List()
 		sort.Strings(peerList)
-		log.Printf("Peer list updated\nwas %v\nnow %v", peers.List(), newPeers.List())
-		shellOut(strings.Join(peerList, "\n"), script)
+		log.Info("peer list updated", "was", peers.List(), "now", newPeers.List())
+		err = shellOut(strings.Join(peerList, "\n"), script)
+		if err != nil {
+			return err
+		}
 		peers = newPeers
 		script = *onChange
 	}
-	// TODO: Exit if there's no on-change?
-	log.Printf("Peer finder exiting")
-
-	log.Println("Block until Kubernetes sends SIGKILL")
-	select {}
+	return nil
 }
