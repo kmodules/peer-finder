@@ -63,12 +63,11 @@ func lookup(svcName string) (sets.String, error) {
 
 func shellOut(sendStdin, script string) {
 	log.Printf("execing: %v with stdin: %v", script, sendStdin)
-	// TODO: Switch to sending stdin from go
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("echo -e '%v' | %v", sendStdin, script))
+	cmd := exec.Command(script)
+	cmd.Stdin = strings.NewReader(sendStdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		log.Fatalf("Failed to execute %v:, err: %v", script, err)
 	}
 }
