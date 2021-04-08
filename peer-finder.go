@@ -27,7 +27,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -35,7 +34,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
-
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
@@ -52,15 +50,14 @@ var (
 )
 
 var (
-	masterURL = flag.String( "master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig)")
-	kubeconfigPath = flag.String( "kubeconfig", "", "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
-
-	onChange  = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
-	onStart   = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
-	svc       = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
-	namespace = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
-	domain    = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
-	selector  = flag.String("selector", "", "The selector is used to select the pods whose ip will use to form peers")
+	masterURL      = flag.String("master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig)")
+	kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
+	onChange       = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
+	onStart        = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
+	svc            = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
+	namespace      = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
+	domain         = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
+	selector       = flag.String("selector", "", "The selector is used to select the pods whose ip will use to form peers")
 )
 
 func lookupDNSs(svcName string) (sets.String, error) {
@@ -250,7 +247,8 @@ func run() error {
 		script = *onChange
 		log.Info(fmt.Sprintf("no on-start supplied, on-change %q will be applied on start.", script))
 	}
-	for newPeers, peers := sets.NewString(), sets.NewString(); script != ""; time.Sleep(pollPeriod) {
+	for peers := sets.NewString(); script != ""; time.Sleep(pollPeriod) {
+		var newPeers sets.String
 		var ipAliases []string
 		if *selector != "" {
 			newPeers, ipAliases, err = listPodsIP(ns)
@@ -276,7 +274,6 @@ func run() error {
 			}
 		}
 		peerList := newPeers.List()
-		sort.Strings(peerList)
 		log.Info("peer list updated", "was", peers.List(), "now", newPeers.List())
 		err = shellOut(strings.Join(peerList, "\n"), script)
 		if err != nil {
