@@ -25,9 +25,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -69,8 +71,31 @@ func shellOut(sendStdin, script string) {
 	log.Print(string(out))
 }
 
+func forwardSigterm() {
+	shutdownHandler := make(chan os.Signal, 1)
+	signal.Notify(shutdownHandler, syscall.SIGTERM)
+	go func() {
+		<-shutdownHandler
+
+		pgid, err := syscall.Getpgid(os.Getpid())
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("sending SIGTERM to pgid", pgid)
+		err = syscall.Kill(-pgid, syscall.SIGTERM)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("waiting for all child process to complete for SIGTERM")
+		<-shutdownHandler
+	}()
+}
+
 func main() {
 	flag.Parse()
+
+	forwardSigterm()
 
 	ns := *namespace
 	if ns == "" {
@@ -151,4 +176,7 @@ func main() {
 	}
 	// TODO: Exit if there's no on-change?
 	log.Printf("Peer finder exiting")
+
+	log.Println("Block until Kubernetes sends SIGKILL")
+	select {}
 }
