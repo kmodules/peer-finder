@@ -31,6 +31,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kballard/go-shellquote"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
@@ -54,6 +55,7 @@ var (
 	kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
 	onChange       = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
 	onStart        = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
+	addrType       = flag.String("adddress-type", "DNS", "Address type used to communicate with peers. Possible values: DNS, IP, IPv4, IPv6.")
 	svc            = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
 	namespace      = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
 	domain         = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
@@ -121,16 +123,24 @@ func listPodsIP(namespace string) (sets.String, []string, error) {
 }
 
 func shellOut(sendStdin, script string) error {
-	log.Info("exec", "command", script, "stdin", sendStdin)
-	cmd := exec.Command(script)
+	fields, err := shellquote.Split(script)
+	if err != nil {
+		return err
+	}
+	if len(fields) == 0 {
+		return fmt.Errorf("missing command: %s", script)
+	}
+
+	log.Info("exec", "command", fields[0], "stdin", sendStdin)
+	cmd := exec.Command(fields[0], fields[1:]...)
 	cmd.Stdin = strings.NewReader(sendStdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
-		log.Error(err, "execution failed", "script", script)
+		return fmt.Errorf("execution failed of script=%s. reason:%v", script, err)
 	}
-	return err
+	return nil
 }
 
 func forwardSigterm() {
@@ -235,6 +245,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
+
 	}
 
 	myName := strings.Join([]string{hostname, *svc, domainName}, ".")
