@@ -18,21 +18,25 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"regexp"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/kballard/go-shellquote"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/klogr"
 )
 
 const (
@@ -40,14 +44,25 @@ const (
 )
 
 var (
-	onChange  = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
-	onStart   = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
-	svc       = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
-	namespace = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
-	domain    = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
+	kc         kubernetes.Interface
+	controller *Controller
+	log        = klogr.New().WithName("peer-finder")
 )
 
-func lookup(svcName string) (sets.String, error) {
+var (
+	masterURL      = flag.String("master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig)")
+	kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
+	hostsFilePath  = flag.String("hosts-file", "/etc/hosts", "Path to hosts file.")
+	onChange       = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
+	onStart        = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
+	addrType       = flag.String("adddress-type", "DNS", "Address type used to communicate with peers. Possible values: DNS, IP, IPv4, IPv6.")
+	svc            = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
+	namespace      = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
+	domain         = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
+	selector       = flag.String("selector", "", "The selector is used to select the pods whose ip will use to form peers")
+)
+
+func lookupDNS(svcName string) (sets.String, error) {
 	endpoints := sets.NewString()
 	_, srvRecords, err := net.LookupSRV("", "", svcName)
 	if err != nil {
@@ -61,50 +76,92 @@ func lookup(svcName string) (sets.String, error) {
 	return endpoints, nil
 }
 
-func shellOut(sendStdin, script string) {
-	log.Printf("execing: %v with stdin: %v", script, sendStdin)
-	cmd := exec.Command(script)
+func lookupHostIPs(hostName string) (sets.String, error) {
+	ips := sets.NewString()
+	hostIPs, err := net.LookupIP(hostName)
+	if err != nil {
+		return nil, err
+	}
+	for _, hostIP := range hostIPs {
+		ips.Insert(hostIP.String())
+	}
+	return ips, nil
+}
+
+func shellOut(sendStdin, script string) error {
+	fields, err := shellquote.Split(script)
+	if err != nil {
+		return err
+	}
+	if len(fields) == 0 {
+		return fmt.Errorf("missing command: %s", script)
+	}
+
+	log.Info("exec", "command", fields[0], "stdin", sendStdin)
+	cmd := exec.Command(fields[0], fields[1:]...)
 	cmd.Stdin = strings.NewReader(sendStdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to execute %v:, err: %v", script, err)
+	err = cmd.Run()
+	if err != nil {
+		return fmt.Errorf("execution failed of script=%s. reason:%v", script, err)
 	}
+	return nil
 }
 
-func forwardSigterm() {
+func forwardSigterm() <-chan struct{} {
 	shutdownHandler := make(chan os.Signal, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
 	signal.Notify(shutdownHandler, syscall.SIGTERM)
 	go func() {
 		<-shutdownHandler
 
 		pgid, err := syscall.Getpgid(os.Getpid())
 		if err != nil {
-			panic(err)
+			log.Error(err, "failed to retrieve pgid for process", "pid", os.Getpid())
+		} else {
+			log.Info("sending SIGTERM", "pgid", pgid)
+			err = syscall.Kill(-pgid, syscall.SIGTERM)
+			if err != nil {
+				log.Error(err, "failed to send SIGTERM", "pgid", pgid)
+			}
 		}
-		fmt.Println("sending SIGTERM to pgid", pgid)
-		err = syscall.Kill(-pgid, syscall.SIGTERM)
-		if err != nil {
-			panic(err)
-		}
+		cancel()
 
 		fmt.Println("waiting for all child process to complete for SIGTERM")
 		<-shutdownHandler
 	}()
+
+	return ctx.Done()
 }
 
 func main() {
+	klog.InitFlags(nil)
+	_ = flag.Set("v", "3")
 	flag.Parse()
 
-	forwardSigterm()
+	stopCh := forwardSigterm()
 
+	// TODO: Exit if there's no on-change?
+	if err := run(stopCh); err != nil {
+		log.Error(err, "peer finder exiting")
+	}
+	klog.Flush()
+
+	log.Info("Block until Kubernetes sends SIGKILL")
+	select {}
+}
+
+func run(stopCh <-chan struct{}) error {
 	ns := *namespace
 	if ns == "" {
 		ns = os.Getenv("POD_NAMESPACE")
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Fatalf("Failed to get hostname: %s", err)
+		return fmt.Errorf("failed to get hostname: %s", err)
 	}
 	var domainName string
 
@@ -113,7 +170,7 @@ func main() {
 		resolvConfBytes, err := ioutil.ReadFile("/etc/resolv.conf")
 		resolvConf := string(resolvConfBytes)
 		if err != nil {
-			log.Fatal("Unable to read /etc/resolv.conf")
+			return fmt.Errorf("unable to read /etc/resolv.conf")
 		}
 
 		var re *regexp.Regexp
@@ -125,7 +182,7 @@ func main() {
 			re, err = regexp.Compile(`\A(.*\n)*search\s{1,}(.*\s{1,})*(?P<goal>svc.([a-zA-Z0-9-]{1,63}\.)*[a-zA-Z0-9]{2,63})`)
 		}
 		if err != nil {
-			log.Fatalf("Failed to create regular expression: %v", err)
+			return fmt.Errorf("failed to create regular expression: %v", err)
 		}
 
 		groupNames := re.SubexpNames()
@@ -142,42 +199,68 @@ func main() {
 				break
 			}
 		}
-		log.Printf("Determined Domain to be %s", domainName)
+		log.Info("determined", "domain", domainName)
 
 	} else {
 		domainName = strings.Join([]string{ns, "svc", *domain}, ".")
 	}
 
-	if *svc == "" || domainName == "" || (*onChange == "" && *onStart == "") {
-		log.Fatalf("Incomplete args, require -on-change and/or -on-start, -service and -ns or an env var for POD_NAMESPACE.")
+	if (*selector == "" && *svc == "") || domainName == "" || (*onChange == "" && *onStart == "") {
+		return fmt.Errorf("incomplete args, require -on-change and/or -on-start, -service and -ns or an env var for POD_NAMESPACE")
+	}
+
+	if *selector != "" {
+		config, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeconfigPath)
+		if err != nil {
+			return fmt.Errorf("could not get Kubernetes config: %s", err)
+		}
+		kc, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			return err
+		}
+		RunHostAliasSyncer(kc, ns, *selector, *addrType, stopCh)
 	}
 
 	myName := strings.Join([]string{hostname, *svc, domainName}, ".")
+	hostIPs, err := lookupHostIPs(hostname)
+	if err != nil {
+		return fmt.Errorf("failed to get ips from host %v", err)
+	}
 	script := *onStart
 	if script == "" {
 		script = *onChange
-		log.Printf("No on-start supplied, on-change %v will be applied on start.", script)
+		log.Info(fmt.Sprintf("no on-start supplied, on-change %q will be applied on start.", script))
 	}
-	for newPeers, peers := sets.NewString(), sets.NewString(); script != ""; time.Sleep(pollPeriod) {
-		newPeers, err = lookup(*svc)
-		if err != nil {
-			log.Printf("%v", err)
-			continue
-		}
-		if newPeers.Equal(peers) || !newPeers.Has(myName) {
-			log.Printf("Have not found myself in list yet.\nMy Hostname: %s\nHosts in list: %s", myName, strings.Join(newPeers.List(), ", "))
-			continue
+	for peers := sets.NewString(); script != ""; time.Sleep(pollPeriod) {
+		var newPeers sets.String
+		if *selector != "" {
+			newPeers, err = controller.listPodsIP()
+			if err != nil {
+				return err
+			}
+			if newPeers.Equal(peers) || !newPeers.HasAny(hostIPs.List()...) {
+				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(newPeers.List(), ", "))
+				continue
+			}
+		} else {
+			newPeers, err = lookupDNS(*svc)
+			if err != nil {
+				log.Info(err.Error())
+				continue
+			}
+			if newPeers.Equal(peers) || !newPeers.Has(myName) {
+				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(newPeers.List(), ", "))
+				continue
+			}
 		}
 		peerList := newPeers.List()
-		sort.Strings(peerList)
-		log.Printf("Peer list updated\nwas %v\nnow %v", peers.List(), newPeers.List())
-		shellOut(strings.Join(peerList, "\n"), script)
+		log.Info("peer list updated", "was", peers.List(), "now", newPeers.List())
+		err = shellOut(strings.Join(peerList, "\n"), script)
+		if err != nil {
+			return err
+		}
 		peers = newPeers
 		script = *onChange
 	}
-	// TODO: Exit if there's no on-change?
-	log.Printf("Peer finder exiting")
-
-	log.Println("Block until Kubernetes sends SIGKILL")
-	select {}
+	return nil
 }
