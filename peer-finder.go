@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/kballard/go-shellquote"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -42,17 +41,18 @@ import (
 
 const (
 	pollPeriod = 1 * time.Second
-	hostsPath  = "/etc/hosts"
 )
 
 var (
-	kubeClient *kubernetes.Clientset
+	kc         kubernetes.Interface
+	controller *Controller
 	log        = klogr.New().WithName("peer-finder")
 )
 
 var (
 	masterURL      = flag.String("master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig)")
 	kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
+	hostsFilePath  = flag.String("hosts-file", "/etc/hosts", "Path to hosts file.")
 	onChange       = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
 	onStart        = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
 	addrType       = flag.String("adddress-type", "DNS", "Address type used to communicate with peers. Possible values: DNS, IP, IPv4, IPv6.")
@@ -62,7 +62,7 @@ var (
 	selector       = flag.String("selector", "", "The selector is used to select the pods whose ip will use to form peers")
 )
 
-func lookupDNSs(svcName string) (sets.String, error) {
+func lookupDNS(svcName string) (sets.String, error) {
 	endpoints := sets.NewString()
 	_, srvRecords, err := net.LookupSRV("", "", svcName)
 	if err != nil {
@@ -83,43 +83,9 @@ func lookupHostIPs(hostName string) (sets.String, error) {
 		return nil, err
 	}
 	for _, hostIP := range hostIPs {
-		ips.Insert(fmt.Sprintf("%v", hostIP.String()))
+		ips.Insert(hostIP.String())
 	}
 	return ips, nil
-}
-
-func updateHostsFile(ipAliases []string) error {
-	//Append second line
-	file, err := os.OpenFile(hostsPath, os.O_APPEND|os.O_RDWR, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	var fileContent string
-	for _, ipAlias := range ipAliases {
-		fileContent += fmt.Sprintf("%s\n", ipAlias)
-	}
-
-	_, err = file.WriteString(fileContent)
-	return err
-}
-
-func listPodsIP(namespace string) (sets.String, []string, error) {
-	endpoints := sets.NewString()
-	var ipAliases []string
-	podList, err := kubeClient.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: *selector,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, pod := range podList.Items {
-		endpoints.Insert(pod.Status.PodIP)
-		ipAliases = append(ipAliases, fmt.Sprintf("%s	%s", pod.Status.PodIP, pod.Name))
-	}
-
-	return endpoints, ipAliases, nil
 }
 
 func shellOut(sendStdin, script string) error {
@@ -143,25 +109,32 @@ func shellOut(sendStdin, script string) error {
 	return nil
 }
 
-func forwardSigterm() {
+func forwardSigterm() <-chan struct{} {
 	shutdownHandler := make(chan os.Signal, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
 	signal.Notify(shutdownHandler, syscall.SIGTERM)
 	go func() {
 		<-shutdownHandler
 
 		pgid, err := syscall.Getpgid(os.Getpid())
 		if err != nil {
-			panic(err)
+			log.Error(err, "failed to retrieve pgid for process", "pid", os.Getpid())
+		} else {
+			log.Info("sending SIGTERM", "pgid", pgid)
+			err = syscall.Kill(-pgid, syscall.SIGTERM)
+			if err != nil {
+				log.Error(err, "failed to send SIGTERM", "pgid", pgid)
+			}
 		}
-		fmt.Println("sending SIGTERM to pgid", pgid)
-		err = syscall.Kill(-pgid, syscall.SIGTERM)
-		if err != nil {
-			panic(err)
-		}
+		cancel()
 
 		fmt.Println("waiting for all child process to complete for SIGTERM")
 		<-shutdownHandler
 	}()
+
+	return ctx.Done()
 }
 
 func main() {
@@ -169,10 +142,10 @@ func main() {
 	_ = flag.Set("v", "3")
 	flag.Parse()
 
-	forwardSigterm()
+	stopCh := forwardSigterm()
 
 	// TODO: Exit if there's no on-change?
-	if err := run(); err != nil {
+	if err := run(stopCh); err != nil {
 		log.Error(err, "peer finder exiting")
 	}
 	klog.Flush()
@@ -181,7 +154,7 @@ func main() {
 	select {}
 }
 
-func run() error {
+func run(stopCh <-chan struct{}) error {
 	ns := *namespace
 	if ns == "" {
 		ns = os.Getenv("POD_NAMESPACE")
@@ -241,11 +214,11 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("could not get Kubernetes config: %s", err)
 		}
-		kubeClient, err = kubernetes.NewForConfig(config)
+		kc, err = kubernetes.NewForConfig(config)
 		if err != nil {
 			return err
 		}
-
+		RunHostAliasSyncer(kc, ns, *selector, *addrType, stopCh)
 	}
 
 	myName := strings.Join([]string{hostname, *svc, domainName}, ".")
@@ -260,9 +233,8 @@ func run() error {
 	}
 	for peers := sets.NewString(); script != ""; time.Sleep(pollPeriod) {
 		var newPeers sets.String
-		var ipAliases []string
 		if *selector != "" {
-			newPeers, ipAliases, err = listPodsIP(ns)
+			newPeers, err = controller.listPodsIP()
 			if err != nil {
 				return err
 			}
@@ -270,11 +242,8 @@ func run() error {
 				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(newPeers.List(), ", "))
 				continue
 			}
-			if err := updateHostsFile(ipAliases); err != nil {
-				return fmt.Errorf("%s file is failed to update, reason: %v", hostsPath, err)
-			}
 		} else {
-			newPeers, err = lookupDNSs(*svc)
+			newPeers, err = lookupDNS(*svc)
 			if err != nil {
 				log.Info(err.Error())
 				continue
