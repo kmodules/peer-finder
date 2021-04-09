@@ -29,7 +29,7 @@ jobs:
         env:
           APPSCODE_ENV: prod
         run: |
-          make release
+          make release COMPRESS=yes
 
       - name: Release
         uses: softprops/action-gh-release@v1
