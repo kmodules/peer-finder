@@ -55,7 +55,7 @@ var (
 	hostsFilePath  = flag.String("hosts-file", "/etc/hosts", "Path to hosts file.")
 	onChange       = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
 	onStart        = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
-	addrType       = flag.String("adddress-type", "DNS", "Address type used to communicate with peers. Possible values: DNS, IP, IPv4, IPv6.")
+	addrType       = flag.String("address-type", "DNS", "Address type used to communicate with peers. Possible values: DNS, IP, IPv4, IPv6.")
 	svc            = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
 	namespace      = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
 	domain         = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
