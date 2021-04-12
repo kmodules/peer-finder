@@ -88,7 +88,7 @@ func lookupHostIPs(hostName string) (sets.String, error) {
 	return ips, nil
 }
 
-func shellOut(sendStdin, script string) error {
+func shellOut(script, sendStdin string) error {
 	fields, err := shellquote.Split(script)
 	if err != nil {
 		return err
@@ -255,7 +255,9 @@ func run(stopCh <-chan struct{}) error {
 		}
 		peerList := newPeers.List()
 		log.Info("peer list updated", "was", peers.List(), "now", newPeers.List())
-		err = shellOut(strings.Join(peerList, "\n"), script)
+
+		// add extra newline at the end to ensure end of line for bash read command
+		err = shellOut(script, strings.Join(peerList, "\n")+"\n")
 		if err != nil {
 			return err
 		}
