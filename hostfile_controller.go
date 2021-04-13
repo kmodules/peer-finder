@@ -273,22 +273,22 @@ func GetIP(pod *core.Pod, addrType string) (string, error) {
 	}
 }
 
-func (c *Controller) GenerateAliases() (string, error) {
+func (c *Controller) GenerateAliases() ([]string, error) {
 	pods, err := c.lister.Pods(c.namespace).List(labels.Everything())
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	peers := make([]string, 0, len(pods))
 	for _, pod := range pods {
 		ip, err := GetIP(pod, c.addrType)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		peers = append(peers, fmt.Sprintf("%s %s", ip, pod.Name))
 	}
 	sort.Strings(peers)
-	return strings.Join(peers, "\n"), nil
+	return peers, nil
 }
 
 func (c *Controller) listPodsIP() (sets.String, error) {
@@ -320,7 +320,7 @@ fe00::1	ip6-allnodes
 fe00::2	ip6-allrouters
 `
 
-func UpdateHostsFile(path, aliases string) (bool, error) {
+func UpdateHostsFile(path string, aliases []string) (bool, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return false, err
@@ -332,8 +332,12 @@ func UpdateHostsFile(path, aliases string) (bool, error) {
 		curHex = matches[1]
 	}
 
-	hash := sha1.Sum([]byte(aliases))
-	newHex := hex.EncodeToString(hash[:])
+	hasher := sha1.New()
+	for i := range aliases {
+		hasher.Write([]byte(aliases[i]))
+		hasher.Write([]byte("\n"))
+	}
+	newHex := hex.EncodeToString(hasher.Sum(nil))
 	if curHex == newHex {
 		return false, nil
 	}
@@ -343,7 +347,11 @@ func UpdateHostsFile(path, aliases string) (bool, error) {
 	out.WriteRune('\n')
 	out.WriteString(fmt.Sprintf("# peer-finder-managed-aliases:%s", newHex))
 	out.WriteRune('\n')
-	out.WriteString(aliases)
+
+	for _, entry := range aliases {
+		out.WriteString(entry)
+		out.WriteString("\n") // \n requires to satisfy bash read command
+	}
 
 	err = ioutil.WriteFile(path, out.Bytes(), 0644)
 	if err != nil {
