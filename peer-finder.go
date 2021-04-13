@@ -200,13 +200,14 @@ func retrieveHostInfo(fqHostname string, hostIPs, peers sets.String) (*HostInfo,
 }
 
 func IPType(s string) (AddressType, error) {
-	if ip := net.ParseIP(s); ip != nil {
-		if len(ip) == net.IPv4len {
-			return AddressTypeIPv4, nil
-		}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return "", fmt.Errorf("%s is not a valid IP", s)
+	}
+	if ip.To4() == nil {
 		return AddressTypeIPv6, nil
 	}
-	return "", fmt.Errorf("%s is not a valid IP", s)
+	return AddressTypeIPv4, nil
 }
 
 func forwardSigterm() <-chan struct{} {
