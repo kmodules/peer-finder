@@ -43,6 +43,18 @@ const (
 	pollPeriod = 1 * time.Second
 )
 
+type AddressType string
+
+const (
+	AddressTypeDNS AddressType = "DNS"
+	// Uses spec.podIP as address for db pods.
+	AddressTypeIP AddressType = "IP"
+	// Uses first IPv4 address from spec.podIP, spec.podIPs fields as address for db pods.
+	AddressTypeIPv4 AddressType = "IPv4"
+	// Uses first IPv6 address from spec.podIP, spec.podIPs fields as address for db pods.
+	AddressTypeIPv6 AddressType = "IPv6"
+)
+
 var (
 	kc         kubernetes.Interface
 	controller *Controller
@@ -55,7 +67,7 @@ var (
 	hostsFilePath  = flag.String("hosts-file", "/etc/hosts", "Path to hosts file.")
 	onChange       = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
 	onStart        = flag.String("on-start", "", "Script to run on start, must accept a new line separated list of peers via stdin.")
-	addrType       = flag.String("address-type", "DNS", "Address type used to communicate with peers. Possible values: DNS, IP, IPv4, IPv6.")
+	addrType       = flag.String("address-type", string(AddressTypeDNS), "Address type used to communicate with peers. Possible values: DNS, IP, IPv4, IPv6.")
 	svc            = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
 	namespace      = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
 	domain         = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
@@ -88,7 +100,10 @@ func lookupHostIPs(hostName string) (sets.String, error) {
 	return ips, nil
 }
 
-func shellOut(script, sendStdin string) error {
+func shellOut(script string, peers, hostIPs sets.String, fqHostname string) error {
+	// add extra newline at the end to ensure end of line for bash read command
+	sendStdin := strings.Join(peers.List(), "\n") + "\n"
+
 	fields, err := shellquote.Split(script)
 	if err != nil {
 		return err
@@ -102,11 +117,96 @@ func shellOut(script, sendStdin string) error {
 	cmd.Stdin = strings.NewReader(sendStdin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
+	info, err := retrieveHostInfo(fqHostname, hostIPs, peers)
+	if err != nil {
+		return err
+	}
+
+	envs := sets.NewString(os.Environ()...)
+
+	envs.Insert("HOST_ADDRESS=" + info.HostAddr)                  // fqdn, ipv4, ipv6
+	envs.Insert("HOST_ADDRESS_TYPE=" + string(info.HostAddrType)) // DNS, IPv4, IPv6
+	// WARNING: Potentially overwrites the POD_IP from container env before passing to script in case of IPv4 or IPv6 in a dual stack cluster
+	envs.Insert("POD_IP=" + info.PodIP)                  // used for whitelist
+	envs.Insert("POD_IP_TYPE=" + string(info.PodIPType)) // IPv4, IPv6
+
+	cmd.Env = envs.List()
+
 	err = cmd.Run()
 	if err != nil {
 		return fmt.Errorf("execution failed of script=%s. reason:%v", script, err)
 	}
 	return nil
+}
+
+type HostInfo struct {
+	// fqdn, ipv4, ipv6
+	HostAddr string
+	// DNS, IPv4, IPv6
+	HostAddrType AddressType
+
+	// used for whitelist
+	// WARNING: Potentially overwrites the POD_IP from container env before passing to script in case of IPv4 or IPv6 in a dual stack cluster
+	PodIP string
+	// IPv4 or IPv6
+	PodIPType AddressType
+}
+
+func retrieveHostInfo(fqHostname string, hostIPs, peers sets.String) (*HostInfo, error) {
+	var info HostInfo
+	var err error
+	switch AddressType(*addrType) {
+	case AddressTypeDNS:
+		info.HostAddr = fqHostname
+		info.HostAddrType = AddressTypeDNS
+		info.PodIP = os.Getenv("POD_IP") // set using Downward api
+		info.PodIPType, err = IPType(info.PodIP)
+		if err != nil {
+			return nil, err
+		}
+	case AddressTypeIP:
+		hostAddrs := peers.Intersection(hostIPs).List()
+		if len(hostAddrs) == 0 {
+			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(hostIPs.List(), ","), strings.Join(peers.List(), ","))
+		}
+		info.HostAddr = hostAddrs[0]
+		info.HostAddrType, err = IPType(info.HostAddr)
+		if err != nil {
+			return nil, err
+		}
+		info.PodIP = info.HostAddr
+		info.PodIPType = info.HostAddrType
+	case AddressTypeIPv4:
+		hostAddrs := peers.Intersection(hostIPs).List()
+		if len(hostAddrs) == 0 {
+			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(hostIPs.List(), ","), strings.Join(peers.List(), ","))
+		}
+		info.HostAddr = hostAddrs[0]
+		info.HostAddrType = AddressTypeIPv4
+		info.PodIP = info.HostAddr
+		info.PodIPType = info.HostAddrType
+	case AddressTypeIPv6:
+		hostAddrs := peers.Intersection(hostIPs).List()
+		if len(hostAddrs) == 0 {
+			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(hostIPs.List(), ","), strings.Join(peers.List(), ","))
+		}
+		info.HostAddr = hostAddrs[0]
+		info.HostAddrType = AddressTypeIPv6
+		info.PodIP = info.HostAddr
+		info.PodIPType = info.HostAddrType
+	}
+	return &info, nil
+}
+
+func IPType(s string) (AddressType, error) {
+	if ip := net.ParseIP(s); ip != nil {
+		if len(ip) == net.IPv4len {
+			return AddressTypeIPv4, nil
+		}
+		return AddressTypeIPv6, nil
+	}
+	return "", fmt.Errorf("%s is not a valid IP", s)
 }
 
 func forwardSigterm() <-chan struct{} {
@@ -253,11 +353,10 @@ func run(stopCh <-chan struct{}) error {
 				continue
 			}
 		}
-		peerList := newPeers.List()
 		log.Info("peer list updated", "was", peers.List(), "now", newPeers.List())
 
 		// add extra newline at the end to ensure end of line for bash read command
-		err = shellOut(script, strings.Join(peerList, "\n")+"\n")
+		err = shellOut(script, newPeers, hostIPs, myName)
 		if err != nil {
 			return err
 		}
