@@ -334,8 +334,14 @@ func UpdateHostsFile(path string, aliases []string) (bool, error) {
 
 	hasher := sha1.New()
 	for i := range aliases {
-		hasher.Write([]byte(aliases[i]))
-		hasher.Write([]byte("\n"))
+		_, err = hasher.Write([]byte(aliases[i]))
+		if err != nil {
+			return false, err
+		}
+		_, err = hasher.Write([]byte("\n"))
+		if err != nil {
+			return false, err
+		}
 	}
 	newHex := hex.EncodeToString(hasher.Sum(nil))
 	if curHex == newHex {
@@ -350,7 +356,7 @@ func UpdateHostsFile(path string, aliases []string) (bool, error) {
 
 	for i := range aliases {
 		out.WriteString(aliases[i])
-		out.WriteString("\n") // \n requires to satisfy bash read command
+		out.WriteString("\n") // \n required to satisfy bash read command
 	}
 
 	err = ioutil.WriteFile(path, out.Bytes(), 0644)
