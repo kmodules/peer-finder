@@ -348,8 +348,8 @@ func UpdateHostsFile(path string, aliases []string) (bool, error) {
 	out.WriteString(fmt.Sprintf("# peer-finder-managed-aliases:%s", newHex))
 	out.WriteRune('\n')
 
-	for _, entry := range aliases {
-		out.WriteString(entry)
+	for i := range aliases {
+		out.WriteString(aliases[i])
 		out.WriteString("\n") // \n requires to satisfy bash read command
 	}
 
