@@ -204,7 +204,7 @@ func IPType(s string) (AddressType, error) {
 	if ip == nil {
 		return "", fmt.Errorf("%s is not a valid IP", s)
 	}
-	if ip.To4() == nil {
+	if strings.ContainsRune(s, ':') {
 		return AddressTypeIPv6, nil
 	}
 	return AddressTypeIPv4, nil

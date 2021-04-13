@@ -255,13 +255,13 @@ func GetIP(pod *core.Pod, addrType string) (string, error) {
 		return addrs[0].IP, nil
 	case "IPv4":
 		for _, addr := range addrs {
-			if ip := net.ParseIP(addr.IP).To4(); ip != nil {
+			if ip := net.ParseIP(addr.IP); ip != nil && !strings.ContainsRune(addr.IP, ':') {
 				return addr.IP, nil
 			}
 		}
 	case "IPv6":
 		for _, addr := range addrs {
-			if ip := net.ParseIP(addr.IP).To4(); ip == nil {
+			if ip := net.ParseIP(addr.IP); ip != nil && strings.ContainsRune(addr.IP, ':') {
 				return addr.IP, nil
 			}
 		}
