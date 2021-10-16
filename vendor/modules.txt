@@ -5,13 +5,14 @@ github.com/go-logr/logr
 # github.com/gogo/protobuf v1.3.2
 github.com/gogo/protobuf/proto
 github.com/gogo/protobuf/sortkeys
-# github.com/golang/protobuf v1.4.3
+# github.com/golang/protobuf v1.5.2
 github.com/golang/protobuf/proto
 github.com/golang/protobuf/ptypes
 github.com/golang/protobuf/ptypes/any
 github.com/golang/protobuf/ptypes/duration
 github.com/golang/protobuf/ptypes/timestamp
-# github.com/google/go-cmp v0.5.2
+# github.com/google/go-cmp v0.5.6
+## explicit
 github.com/google/go-cmp/cmp
 github.com/google/go-cmp/cmp/internal/diff
 github.com/google/go-cmp/cmp/internal/flags
@@ -19,16 +20,21 @@ github.com/google/go-cmp/cmp/internal/function
 github.com/google/go-cmp/cmp/internal/value
 # github.com/google/gofuzz v1.1.0
 github.com/google/gofuzz
-# github.com/googleapis/gnostic v0.4.1
+# github.com/googleapis/gnostic v0.5.5
+## explicit
 github.com/googleapis/gnostic/compiler
 github.com/googleapis/gnostic/extensions
+github.com/googleapis/gnostic/jsonschema
 github.com/googleapis/gnostic/openapiv2
-# github.com/hashicorp/golang-lru v0.5.1
+# github.com/hashicorp/golang-lru v0.5.4
+## explicit
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
-# github.com/imdario/mergo v0.3.5
+# github.com/imdario/mergo v0.3.12
+## explicit
 github.com/imdario/mergo
-# github.com/json-iterator/go v1.1.10
+# github.com/json-iterator/go v1.1.11
+## explicit
 github.com/json-iterator/go
 # github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 ## explicit
@@ -39,7 +45,10 @@ github.com/modern-go/concurrent
 github.com/modern-go/reflect2
 # github.com/spf13/pflag v1.0.5
 github.com/spf13/pflag
-# golang.org/x/net v0.0.0-20210224082022-3d97a244fca7
+# github.com/stretchr/testify v1.7.0
+## explicit
+# golang.org/x/net v0.0.0-20210428140749-89ef3d95e781
+## explicit
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
 golang.org/x/net/http/httpguts
@@ -49,21 +58,23 @@ golang.org/x/net/idna
 # golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sys v0.0.0-20210225134936-a50acf3fe073
+# golang.org/x/sys v0.0.0-20210603081109-ebe580a85c40
+## explicit
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 # golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
 golang.org/x/term
-# golang.org/x/text v0.3.4
+# golang.org/x/text v0.3.6
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 # golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
 golang.org/x/time/rate
-# google.golang.org/appengine v1.6.5
+# google.golang.org/appengine v1.6.7
+## explicit
 google.golang.org/appengine/internal
 google.golang.org/appengine/internal/base
 google.golang.org/appengine/internal/datastore
@@ -71,7 +82,7 @@ google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/remote_api
 google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
-# google.golang.org/protobuf v1.25.0
+# google.golang.org/protobuf v1.26.0
 google.golang.org/protobuf/encoding/prototext
 google.golang.org/protobuf/encoding/protowire
 google.golang.org/protobuf/internal/descfmt
@@ -82,22 +93,23 @@ google.golang.org/protobuf/internal/encoding/messageset
 google.golang.org/protobuf/internal/encoding/tag
 google.golang.org/protobuf/internal/encoding/text
 google.golang.org/protobuf/internal/errors
-google.golang.org/protobuf/internal/fieldsort
 google.golang.org/protobuf/internal/filedesc
 google.golang.org/protobuf/internal/filetype
 google.golang.org/protobuf/internal/flags
 google.golang.org/protobuf/internal/genid
 google.golang.org/protobuf/internal/impl
-google.golang.org/protobuf/internal/mapsort
+google.golang.org/protobuf/internal/order
 google.golang.org/protobuf/internal/pragma
 google.golang.org/protobuf/internal/set
 google.golang.org/protobuf/internal/strs
 google.golang.org/protobuf/internal/version
 google.golang.org/protobuf/proto
+google.golang.org/protobuf/reflect/protodesc
 google.golang.org/protobuf/reflect/protoreflect
 google.golang.org/protobuf/reflect/protoregistry
 google.golang.org/protobuf/runtime/protoiface
 google.golang.org/protobuf/runtime/protoimpl
+google.golang.org/protobuf/types/descriptorpb
 google.golang.org/protobuf/types/known/anypb
 google.golang.org/protobuf/types/known/durationpb
 google.golang.org/protobuf/types/known/timestamppb
@@ -105,6 +117,9 @@ google.golang.org/protobuf/types/known/timestamppb
 gopkg.in/inf.v0
 # gopkg.in/yaml.v2 v2.4.0
 gopkg.in/yaml.v2
+# gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+## explicit
+gopkg.in/yaml.v3
 # k8s.io/api v0.21.1
 ## explicit
 k8s.io/api/admissionregistration/v1
@@ -309,7 +324,8 @@ k8s.io/client-go/util/workqueue
 ## explicit
 k8s.io/klog/v2
 k8s.io/klog/v2/klogr
-# k8s.io/utils v0.0.0-20201110183641-67b214c5f920
+# k8s.io/utils v0.0.0-20210527160623-6fdb442a123b
+## explicit
 k8s.io/utils/buffer
 k8s.io/utils/integer
 k8s.io/utils/trace
@@ -320,3 +336,9 @@ sigs.k8s.io/structured-merge-diff/v4/typed
 sigs.k8s.io/structured-merge-diff/v4/value
 # sigs.k8s.io/yaml v1.2.0
 sigs.k8s.io/yaml
+# github.com/satori/go.uuid => github.com/gofrs/uuid v4.0.0+incompatible
+# github.com/dgrijalva/jwt-go => github.com/gomodules/jwt v3.2.2+incompatible
+# github.com/golang-jwt/jwt => github.com/golang-jwt/jwt v3.2.2+incompatible
+# github.com/form3tech-oss/jwt-go => github.com/form3tech-oss/jwt-go v3.2.5+incompatible
+# helm.sh/helm/v3 => github.com/kubepack/helm/v3 v3.6.1-0.20210518225915-c3e0ce48dd1b
+# k8s.io/apiserver => github.com/kmodules/apiserver v0.21.2-0.20210716212718-83e5493ac170
