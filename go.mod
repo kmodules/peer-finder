@@ -21,7 +21,7 @@ require (
 	k8s.io/utils v0.0.0-20210527160623-6fdb442a123b // indirect
 )
 
-replace github.com/satori/go.uuid => github.com/gofrs/uuid v4.0.0+incompatible
+replace github.com/satori/go.uuid => github.com/gomodules/uuid v4.0.0+incompatible
 
 replace github.com/dgrijalva/jwt-go => github.com/gomodules/jwt v3.2.2+incompatible
 
