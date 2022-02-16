@@ -20,6 +20,8 @@ github.com/google/go-cmp/cmp/internal/function
 github.com/google/go-cmp/cmp/internal/value
 # github.com/google/gofuzz v1.1.0
 github.com/google/gofuzz
+# github.com/google/uuid v1.3.0
+## explicit
 # github.com/googleapis/gnostic v0.5.5
 ## explicit
 github.com/googleapis/gnostic/compiler
@@ -55,10 +57,11 @@ golang.org/x/net/http/httpguts
 golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
-# golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
+# golang.org/x/oauth2 v0.0.0-20210402161424-2e8d93401602
+## explicit
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sys v0.0.0-20210603081109-ebe580a85c40
+# golang.org/x/sys v0.0.0-20210817190340-bfb29a6856f2
 ## explicit
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
@@ -66,12 +69,14 @@ golang.org/x/sys/unix
 golang.org/x/sys/windows
 # golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d
 golang.org/x/term
-# golang.org/x/text v0.3.6
+# golang.org/x/text v0.3.7
+## explicit
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
+# golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
+## explicit
 golang.org/x/time/rate
 # google.golang.org/appengine v1.6.7
 ## explicit
@@ -320,16 +325,17 @@ k8s.io/client-go/util/flowcontrol
 k8s.io/client-go/util/homedir
 k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/workqueue
-# k8s.io/klog/v2 v2.8.0
+# k8s.io/klog/v2 v2.9.0
 ## explicit
 k8s.io/klog/v2
 k8s.io/klog/v2/klogr
-# k8s.io/utils v0.0.0-20210527160623-6fdb442a123b
+# k8s.io/utils v0.0.0-20210802155522-efc7438f0176
 ## explicit
 k8s.io/utils/buffer
 k8s.io/utils/integer
 k8s.io/utils/trace
-# sigs.k8s.io/structured-merge-diff/v4 v4.1.0
+# sigs.k8s.io/structured-merge-diff/v4 v4.1.2
+## explicit
 sigs.k8s.io/structured-merge-diff/v4/fieldpath
 sigs.k8s.io/structured-merge-diff/v4/schema
 sigs.k8s.io/structured-merge-diff/v4/typed
@@ -341,4 +347,4 @@ sigs.k8s.io/yaml
 # github.com/golang-jwt/jwt => github.com/golang-jwt/jwt v3.2.2+incompatible
 # github.com/form3tech-oss/jwt-go => github.com/form3tech-oss/jwt-go v3.2.5+incompatible
 # helm.sh/helm/v3 => github.com/kubepack/helm/v3 v3.6.1-0.20210518225915-c3e0ce48dd1b
-# k8s.io/apiserver => github.com/kmodules/apiserver v0.21.2-0.20210716212718-83e5493ac170
+# k8s.io/apiserver => github.com/kmodules/apiserver v0.21.2-0.20220112070009-e3f6e88991d9
