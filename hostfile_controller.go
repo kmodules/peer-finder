@@ -359,7 +359,7 @@ func UpdateHostsFile(path string, aliases []string) (bool, error) {
 		out.WriteString("\n") // \n required to satisfy bash read command
 	}
 
-	err = ioutil.WriteFile(path, out.Bytes(), 0644)
+	err = ioutil.WriteFile(path, out.Bytes(), 0o644)
 	if err != nil {
 		return false, err
 	}
