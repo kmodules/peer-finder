@@ -21,7 +21,6 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"regexp"
@@ -321,7 +320,7 @@ fe00::2	ip6-allrouters
 `
 
 func UpdateHostsFile(path string, aliases []string) (bool, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return false, err
 	}
@@ -359,7 +358,7 @@ func UpdateHostsFile(path string, aliases []string) (bool, error) {
 		out.WriteString("\n") // \n required to satisfy bash read command
 	}
 
-	err = ioutil.WriteFile(path, out.Bytes(), 0o644)
+	err = os.WriteFile(path, out.Bytes(), 0o644)
 	if err != nil {
 		return false, err
 	}
