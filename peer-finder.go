@@ -57,7 +57,7 @@ const (
 var (
 	kc         kubernetes.Interface
 	controller *Controller
-	log        = klogr.New().WithName("peer-finder")
+	log        = klogr.New().WithName("peer-finder") // nolint:staticcheck
 )
 
 var (
@@ -73,8 +73,8 @@ var (
 	selector       = flag.String("selector", "", "The selector is used to select the pods whose ip will use to form peers")
 )
 
-func lookupDNS(svcName string) (sets.String, error) {
-	endpoints := sets.NewString()
+func lookupDNS(svcName string) (sets.Set[string], error) {
+	endpoints := sets.New[string]()
 	_, srvRecords, err := net.LookupSRV("", "", svcName)
 	if err != nil {
 		return endpoints, err
@@ -87,8 +87,8 @@ func lookupDNS(svcName string) (sets.String, error) {
 	return endpoints, nil
 }
 
-func lookupHostIPs(hostName string) (sets.String, error) {
-	ips := sets.NewString()
+func lookupHostIPs(hostName string) (sets.Set[string], error) {
+	ips := sets.New[string]()
 	hostIPs, err := net.LookupIP(hostName)
 	if err != nil {
 		return nil, err
@@ -99,9 +99,9 @@ func lookupHostIPs(hostName string) (sets.String, error) {
 	return ips, nil
 }
 
-func shellOut(script string, peers, hostIPs sets.String, fqHostname string) error {
+func shellOut(script string, peers, hostIPs sets.Set[string], fqHostname string) error {
 	// add extra newline at the end to ensure end of line for bash read command
-	sendStdin := strings.Join(peers.List(), "\n") + "\n"
+	sendStdin := strings.Join(sets.List(peers), "\n") + "\n"
 
 	fields, err := shellquote.Split(script)
 	if err != nil {
@@ -152,7 +152,7 @@ type HostInfo struct {
 	PodIPType AddressType
 }
 
-func retrieveHostInfo(fqHostname string, hostIPs, peers sets.String) (*HostInfo, error) {
+func retrieveHostInfo(fqHostname string, hostIPs, peers sets.Set[string]) (*HostInfo, error) {
 	var info HostInfo
 	var err error
 	switch AddressType(*addrType) {
@@ -165,9 +165,9 @@ func retrieveHostInfo(fqHostname string, hostIPs, peers sets.String) (*HostInfo,
 			return nil, err
 		}
 	case AddressTypeIP:
-		hostAddrs := peers.Intersection(hostIPs).List()
+		hostAddrs := sets.List(peers.Intersection(hostIPs))
 		if len(hostAddrs) == 0 {
-			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(hostIPs.List(), ","), strings.Join(peers.List(), ","))
+			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(sets.List(hostIPs), ","), strings.Join(sets.List(peers), ","))
 		}
 		info.HostAddr = hostAddrs[0]
 		info.HostAddrType, err = IPType(info.HostAddr)
@@ -177,18 +177,18 @@ func retrieveHostInfo(fqHostname string, hostIPs, peers sets.String) (*HostInfo,
 		info.PodIP = info.HostAddr
 		info.PodIPType = info.HostAddrType
 	case AddressTypeIPv4:
-		hostAddrs := peers.Intersection(hostIPs).List()
+		hostAddrs := sets.List(peers.Intersection(hostIPs))
 		if len(hostAddrs) == 0 {
-			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(hostIPs.List(), ","), strings.Join(peers.List(), ","))
+			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(sets.List(hostIPs), ","), strings.Join(sets.List(peers), ","))
 		}
 		info.HostAddr = hostAddrs[0]
 		info.HostAddrType = AddressTypeIPv4
 		info.PodIP = info.HostAddr
 		info.PodIPType = info.HostAddrType
 	case AddressTypeIPv6:
-		hostAddrs := peers.Intersection(hostIPs).List()
+		hostAddrs := sets.List(peers.Intersection(hostIPs))
 		if len(hostAddrs) == 0 {
-			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(hostIPs.List(), ","), strings.Join(peers.List(), ","))
+			return nil, fmt.Errorf("none of the hostIPs %q found in peers %q", strings.Join(sets.List(hostIPs), ","), strings.Join(sets.List(peers), ","))
 		}
 		info.HostAddr = hostAddrs[0]
 		info.HostAddrType = AddressTypeIPv6
@@ -331,15 +331,15 @@ func run(stopCh <-chan struct{}) error {
 		script = *onChange
 		log.Info(fmt.Sprintf("no on-start supplied, on-change %q will be applied on start.", script))
 	}
-	for peers := sets.NewString(); script != ""; time.Sleep(pollPeriod) {
-		var newPeers sets.String
+	for peers := sets.New[string](); script != ""; time.Sleep(pollPeriod) {
+		var newPeers sets.Set[string]
 		if *selector != "" {
 			newPeers, err = controller.listPodsIP()
 			if err != nil {
 				return err
 			}
-			if newPeers.Equal(peers) || !newPeers.HasAny(hostIPs.List()...) {
-				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(newPeers.List(), ", "))
+			if newPeers.Equal(peers) || !newPeers.HasAny(hostIPs.UnsortedList()...) {
+				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(sets.List(newPeers), ", "))
 				continue
 			}
 		} else {
@@ -349,11 +349,11 @@ func run(stopCh <-chan struct{}) error {
 				continue
 			}
 			if newPeers.Equal(peers) || !newPeers.Has(myName) {
-				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(newPeers.List(), ", "))
+				log.Info("have not found myself in list yet.", "hostname", myName, "hosts in list", strings.Join(sets.List(newPeers), ", "))
 				continue
 			}
 		}
-		log.Info("peer list updated", "was", peers.List(), "now", newPeers.List())
+		log.Info("peer list updated", "was", sets.List(peers), "now", sets.List(newPeers))
 
 		// add extra newline at the end to ensure end of line for bash read command
 		err = shellOut(script, newPeers, hostIPs, myName)

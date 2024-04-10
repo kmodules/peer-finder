@@ -290,13 +290,13 @@ func (c *Controller) GenerateAliases() ([]string, error) {
 	return peers, nil
 }
 
-func (c *Controller) listPodsIP() (sets.String, error) {
+func (c *Controller) listPodsIP() (sets.Set[string], error) {
 	pods, err := c.lister.Pods(c.namespace).List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
 
-	endpoints := sets.NewString()
+	endpoints := sets.New[string]()
 	for _, pod := range pods {
 		ip, err := GetIP(pod, c.addrType)
 		if err != nil {
