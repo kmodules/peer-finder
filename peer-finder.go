@@ -42,6 +42,10 @@ const (
 	pollPeriod = 1 * time.Second
 )
 
+const (
+	defaultTimeout = 10 * time.Second
+)
+
 type AddressType string
 
 const (
@@ -75,15 +79,26 @@ var (
 
 func lookupDNS(svcName string) (sets.Set[string], error) {
 	endpoints := sets.New[string]()
-	_, srvRecords, err := net.LookupSRV("", "", svcName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
+	_, srvRecords, err := net.DefaultResolver.LookupSRV(ctx, "", "", svcName)
 	if err != nil {
-		return endpoints, err
+		return endpoints, fmt.Errorf("DNS lookup failed for service %s: %w", svcName, err)
 	}
+
 	for _, srvRecord := range srvRecords {
 		// The SRV records ends in a "." for the root domain
-		ep := fmt.Sprintf("%v", srvRecord.Target[:len(srvRecord.Target)-1])
+		// Trim the trailing dot
+		ep := strings.TrimSuffix(srvRecord.Target, ".")
 		endpoints.Insert(ep)
 	}
+
+	if endpoints.Len() == 0 {
+		return endpoints, fmt.Errorf("no endpoints found for service %s", svcName)
+	}
+
 	return endpoints, nil
 }
 
