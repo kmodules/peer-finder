@@ -292,10 +292,10 @@ func run(stopCh <-chan struct{}) error {
 	// If domain is not provided, try to get it from resolv.conf
 	if *domain == "" {
 		resolvConfBytes, err := os.ReadFile("/etc/resolv.conf")
-		resolvConf := string(resolvConfBytes)
 		if err != nil {
 			return fmt.Errorf("unable to read /etc/resolv.conf")
 		}
+		resolvConf := string(resolvConfBytes)
 
 		var re *regexp.Regexp
 		if ns == "" {
