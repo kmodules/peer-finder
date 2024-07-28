@@ -65,7 +65,7 @@ var (
 )
 
 var (
-	masterURL      = flag.String("master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig)")
+	masterURL      = flag.String("master", "", "The address of the Kubernetes API server (overrides any value in kubeconfig).")
 	kubeconfigPath = flag.String("kubeconfig", "", "Path to kubeconfig file with authorization information (the master location is set by the master flag).")
 	hostsFilePath  = flag.String("hosts-file", "/etc/hosts", "Path to hosts file.")
 	onChange       = flag.String("on-change", "", "Script to run on change, must accept a new line separated list of peers via stdin.")
@@ -74,7 +74,7 @@ var (
 	svc            = flag.String("service", "", "Governing service responsible for the DNS records of the domain this pod is in.")
 	namespace      = flag.String("ns", "", "The namespace this pod is running in. If unspecified, the POD_NAMESPACE env var is used.")
 	domain         = flag.String("domain", "", "The Cluster Domain which is used by the Cluster, if not set tries to determine it from /etc/resolv.conf file.")
-	selector       = flag.String("selector", "", "The selector is used to select the pods whose ip will use to form peers")
+	selector       = flag.String("selector", "", "The selector is used to select the pods whose ip will use to form peers.")
 )
 
 func lookupDNS(svcName string) (sets.Set[string], error) {
@@ -148,7 +148,7 @@ func shellOut(script string, peers, hostIPs sets.Set[string], fqHostname string)
 
 	envs := sets.NewString(os.Environ()...)
 
-	envs.Insert("HOST_ADDRESS=" + info.HostAddr)                  // fqdn, ipv4, ipv6
+	envs.Insert("HOST_ADDRESS=" + info.HostAddr)                  // FQDN, IPv4, IPv6
 	envs.Insert("HOST_ADDRESS_TYPE=" + string(info.HostAddrType)) // DNS, IPv4, IPv6
 	// WARNING: Potentially overwrites the POD_IP from container env before passing to script in case of IPv4 or IPv6 in a dual stack cluster
 	envs.Insert("POD_IP=" + info.PodIP)                  // used for whitelist
@@ -164,12 +164,12 @@ func shellOut(script string, peers, hostIPs sets.Set[string], fqHostname string)
 }
 
 type HostInfo struct {
-	// fqdn, ipv4, ipv6
+	// FQDN, IPv4, IPv6
 	HostAddr string
 	// DNS, IPv4, IPv6
 	HostAddrType AddressType
 
-	// used for whitelist
+	// used for allowlist
 	// WARNING: Potentially overwrites the POD_IP from container env before passing to script in case of IPv4 or IPv6 in a dual stack cluster
 	PodIP string
 	// IPv4 or IPv6
@@ -179,11 +179,12 @@ type HostInfo struct {
 func retrieveHostInfo(fqHostname string, hostIPs, peers sets.Set[string]) (*HostInfo, error) {
 	var info HostInfo
 	var err error
+
 	switch AddressType(*addrType) {
 	case AddressTypeDNS:
 		info.HostAddr = fqHostname
 		info.HostAddrType = AddressTypeDNS
-		info.PodIP = os.Getenv("POD_IP") // set using Downward api
+		info.PodIP = os.Getenv("POD_IP") // set using Downward API
 		info.PodIPType, err = IPType(info.PodIP)
 		if err != nil {
 			return nil, err
@@ -225,7 +226,7 @@ func retrieveHostInfo(fqHostname string, hostIPs, peers sets.Set[string]) (*Host
 func IPType(s string) (AddressType, error) {
 	ip := net.ParseIP(s)
 	if ip == nil {
-		return "", fmt.Errorf("%s is not a valid IP", s)
+		return "", fmt.Errorf("%s is not a valid IP address", s)
 	}
 	if strings.ContainsRune(s, ':') {
 		return AddressTypeIPv6, nil
@@ -270,15 +271,16 @@ func main() {
 
 	// TODO: Exit if there's no on-change?
 	if err := run(stopCh); err != nil {
-		log.Error(err, "peer finder exiting")
+		log.Error(err, "peer finder exiting.")
 	}
 	klog.Flush()
 
-	log.Info("Block until Kubernetes sends SIGKILL")
+	log.Info("Block until Kubernetes sends the signal SIGKILL .")
 	select {}
 }
 
 func run(stopCh <-chan struct{}) error {
+	var domainName string
 	ns := *namespace
 	if ns == "" {
 		ns = os.Getenv("POD_NAMESPACE")
@@ -287,7 +289,6 @@ func run(stopCh <-chan struct{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to get hostname: %s", err)
 	}
-	var domainName string
 
 	// If domain is not provided, try to get it from resolv.conf
 	if *domain == "" {
@@ -330,7 +331,7 @@ func run(stopCh <-chan struct{}) error {
 	}
 
 	if (*selector == "" && *svc == "") || domainName == "" || (*onChange == "" && *onStart == "") {
-		return fmt.Errorf("incomplete args, require -on-change and/or -on-start, -service and -ns or an env var for POD_NAMESPACE")
+		return fmt.Errorf("incomplete arguments, require -on-change and/or -on-start, -service and -ns or an environment variable named POD_NAMESPACE")
 	}
 
 	if *selector != "" {
@@ -348,7 +349,7 @@ func run(stopCh <-chan struct{}) error {
 	myName := strings.Join([]string{hostname, *svc, domainName}, ".")
 	hostIPs, err := lookupHostIPs(hostname)
 	if err != nil {
-		return fmt.Errorf("failed to get ips from host %v", err)
+		return fmt.Errorf("failed to get IP addresses from host %v", err)
 	}
 	script := *onStart
 	if script == "" {
