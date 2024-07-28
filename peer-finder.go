@@ -103,14 +103,23 @@ func lookupDNS(svcName string) (sets.Set[string], error) {
 }
 
 func lookupHostIPs(hostName string) (sets.Set[string], error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+
 	ips := sets.New[string]()
-	hostIPs, err := net.LookupIP(hostName)
+	hostIPs, err := net.DefaultResolver.LookupIP(ctx, "ip", hostName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("IP lookup failed for host %s: %w", hostName, err)
 	}
+
 	for _, hostIP := range hostIPs {
 		ips.Insert(hostIP.String())
 	}
+
+	if ips.Len() == 0 {
+		return nil, fmt.Errorf("no valid IP addresses found for host %s", hostName)
+	}
+
 	return ips, nil
 }
 
